@@ -9,16 +9,44 @@ on:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [v4.14, v4.19, v5.4, v5.9, v5.10, next]
     runs-on: ubuntu-latest
+    env:
+      BRANCH: qcom-apq8064-${{ matrix.kernel }}
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+        with:
+          repository: "okias/linux"
+          ref: ${{ env.BRANCH }}
+          path: linux
       - name: Build
         run: dash ./build.sh
       - uses: "marvinpinto/action-automatic-releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest"
+          automatic_release_tag: "${{ env.BRANCH }}"
           prerelease: true
-          title: "Development Build"
+          title: "Build ${{ env.BRANCH }}"
           files: |
             *.tar
+  dtbs:
+    strategy:
+      fail-fast: false
+      matrix:
+        kernel: [v5.4, next]
+    runs-on: ubuntu-latest
+    env:
+      BRANCH: qcom-apq8064-${{ matrix.kernel }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+        with:
+          repository: "okias/linux"
+          ref: ${{ env.BRANCH }}
+          path: linux
+      - name: Build
+        run: dash ./dtb_check.sh
