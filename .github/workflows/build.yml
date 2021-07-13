@@ -8,6 +8,8 @@ env:
   CROSS_COMPILE: arm-linux-gnueabihf- # build for armv7
   ARCH_SPEC_PKGS: crossbuild-essential-armhf
   ARCH: arm # build for armv7
+  SCCACHE_CACHE_SIZE: 2G
+  SCCACHE_DIR: /home/runner/.cache/sccache
 
 on:
   push:
@@ -21,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kernel: [v5.4, v5.10, v5.11]
+        kernel: [v5.10]
     runs-on: ubuntu-latest
     env:
       TUXMAKE_EXTRA_OPTS:
@@ -36,17 +38,42 @@ jobs:
           repository: ${{ env.KERNEL_GITHUB_REPOSITORY }}
           ref: ${{ env.KERNEL_NAME }}-${{ matrix.kernel }}
           path: linux
+      - name: Install sccache
+        env:
+          LINK: https://github.com/mozilla/sccache/releases/download
+          SCCACHE_VERSION: 0.2.15
+        run: |
+          export SCCACHE_FILE=sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl
+          mkdir -p $HOME/.local/bin
+          curl -L "$LINK/v$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
+          mv -f $SCCACHE_FILE/sccache $HOME/.local/bin/sccache
+          chmod +x $HOME/.local/bin/sccache
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Enable cache
+        uses: actions/cache@v2
+        continue-on-error: false
+        with:
+          path: ${{ env.SCCACHE_DIR }}
+          key: ${{ env.KERNEL_NAME }}-${{ matrix.kernel }}
+      - name: Start sccache server
+        run: sccache --start-server
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq update > /dev/null
+          sudo apt-get -qq install -y --no-install-recommends -o=Dpkg::Use-Pty=0 ${{ env.ARCH_SPEC_PKGS }} git build-essential binutils-multiarch device-tree-compiler fakeroot libncurses5-dev libssl-dev bison flex libelf-dev dwarves python3-pip socat > /dev/null
+          pip3 install -U --user tuxmake
       - name: Build
         run: |
           export BRANCH=${{ env.KERNEL_NAME }}-${{ matrix.kernel }}
-          sudo apt-get -qq update > /dev/null
-          sudo apt-get -qq install -y --no-install-recommends -o=Dpkg::Use-Pty=0 ${{ env.ARCH_SPEC_PKGS }} git build-essential binutils-multiarch device-tree-compiler fakeroot libncurses5-dev libssl-dev ccache bison flex libelf-dev dwarves python3-pip socat > /dev/null
-          pip3 install -U --user tuxmake
-          tuxmake --directory linux --build-dir=cache/ --target-arch=arm -k $KBUILD_DEFCONFIG $TUXMAKE_EXTRA_OPTS
+          tuxmake --directory linux -w sccache --target-arch=arm -k $KBUILD_DEFCONFIG $TUXMAKE_EXTRA_OPTS
           cd /home/runner/.cache/tuxmake/builds/1/
           tar -cf linux-${BRANCH}.tar *
           cd -
           mv /home/runner/.cache/tuxmake/builds/1/linux-${BRANCH}.tar ./
+      - name: Print sccache stats
+        run: sccache --show-stats
+      - name: Stop sccache server
+        run: sccache --stop-server || true
       - uses: "marvinpinto/action-automatic-releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
