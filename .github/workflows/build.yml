@@ -13,9 +13,7 @@ env:
 
 on:
   push:
-    branches: [ master ]
   pull_request:
-    branches: [ master ]
   workflow_dispatch:
 
 jobs:
@@ -23,14 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kernel: [v5.10]
+        kernel: [mainline,next]
+        cc: [gcc, clang]
     runs-on: ubuntu-latest
     env:
-      TUXMAKE_EXTRA_OPTS:
-        #"--kconfig-add CONFIG_GENERIC_IRQ_DEBUGFS=y"
-        #         --kconfig-add CONFIG_SOFTLOCKUP_DETECTOR=y
-        #         --kconfig-add CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
-        #         --kconfig-add CONFIG_WQ_WATCHDOG=y" # for debugging, set what you need
+      TUXMAKE_EXTRA_OPTS: >
+        --kconfig-add CONFIG_DEBUG_FS=y
+        --kconfig-add CONFIG_GENERIC_IRQ_DEBUGFS=y
     steps:
       - uses: actions/checkout@v2
       - uses: actions/checkout@v2
@@ -54,22 +51,19 @@ jobs:
         continue-on-error: false
         with:
           path: ${{ env.SCCACHE_DIR }}
-          key: ${{ env.KERNEL_NAME }}-${{ matrix.kernel }}
+          key: ${{ env.KERNEL_NAME }}-${{ matrix.kernel }}-${{ matrix.cc }}
       - name: Start sccache server
         run: sccache --start-server
       - name: Install dependencies
         run: |
           sudo apt-get -qq update > /dev/null
-          sudo apt-get -qq install -y --no-install-recommends -o=Dpkg::Use-Pty=0 ${{ env.ARCH_SPEC_PKGS }} git build-essential binutils-multiarch device-tree-compiler fakeroot libncurses5-dev libssl-dev bison flex libelf-dev dwarves python3-pip socat > /dev/null
+          sudo apt-get -qq install -y --no-install-recommends -o=Dpkg::Use-Pty=0 ${{ env.ARCH_SPEC_PKGS }} git build-essential binutils-multiarch device-tree-compiler fakeroot libncurses5-dev libssl-dev bison flex libelf-dev dwarves python3-pip socat clang-12 > /dev/null
           pip3 install -U --user tuxmake
       - name: Build
         run: |
-          export BRANCH=${{ env.KERNEL_NAME }}-${{ matrix.kernel }}
           tuxmake --directory linux -w sccache --target-arch=arm -k $KBUILD_DEFCONFIG $TUXMAKE_EXTRA_OPTS
-          cd /home/runner/.cache/tuxmake/builds/1/
-          tar -cf linux-${BRANCH}.tar *
-          cd -
-          mv /home/runner/.cache/tuxmake/builds/1/linux-${BRANCH}.tar ./
+          mv /home/runner/.cache/tuxmake/builds/1/vmlinux.xz ./debug-vmlinux.xz
+          tar -cf linux-${{ env.KERNEL_NAME }}-${{ matrix.kernel}}-${{ matrix.cc }}.tar -C /home/runner/.cache/tuxmake/builds/1 .
       - name: Print sccache stats
         run: sccache --show-stats
       - name: Stop sccache server
@@ -77,16 +71,17 @@ jobs:
       - uses: "marvinpinto/action-automatic-releases@latest"
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "${{ env.KERNEL_NAME }}-${{ matrix.kernel }}"
+          automatic_release_tag: "${{ env.KERNEL_NAME }}-${{ matrix.kernel }}-${{ matrix.cc }}"
           prerelease: true
-          title: "Build ${{ env.KERNEL_NAME }}-${{ matrix.kernel }}"
+          title: "Build of ${{ env.KERNEL_NAME }} ${{ matrix.kernel }}, compiled with ${{ matrix.cc }}"
           files: |
             *.tar
+            *.xz
   dtbs:
     strategy:
       fail-fast: false
       matrix:
-        kernel: [v5.4]
+        kernel: [next]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -110,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        kernel: [v5.4]
+        kernel: [next]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
